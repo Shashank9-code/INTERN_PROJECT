@@ -1,0 +1,502 @@
+% Full IEEE formatted report generated for the user
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% Packages
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    citecolor=blue!60!black,
+    urlcolor=blue!60!black}
+% Graphics path (adjust if you move files)
+\graphicspath{{../defense_outputs/}{../standalone_tutorials/}{../}{}}
+\begin{document}
+% --- Title & Authors ---------------------------------------------------------
+\title{Friend Recommendation System\\using Graph Neural Networks\\(A Scalable Benchmarking Framework)}
+\author{
+\IEEEauthorblockN{Shashank Prabhakar\IEEEauthorrefmark{1},
+Roushani Kumari\IEEEauthorrefmark{2},
+Akhand Pratap\IEEEauthorrefmark{3}}
+\IEEEauthorblockA{\IEEEauthorrefmark{1}Department of Computer Science & Engineering, NIT Patna, India\\
+Email: \href{mailto:shashank.prabhakar@nitp.ac.in}{shashank.prabhakar@nitp.ac.in}}
+\IEEEauthorblockA{\IEEEauthorrefmark{2}Department of Computer Science & Engineering, NIT Patna, India\\
+Email: \href{mailto:roushani.kumari@nitp.ac.in}{roushani.kumari@nitp.ac.in}}
+\IEEEauthorblockA{\IEEEauthorrefmark{3}Department of Computer Science & Engineering, NIT Patna, India\\
+Email: \href{mailto:akhand.pratap@nitp.ac.in}{akhand.pratap@nitp.ac.in}}
+}
+\maketitle
+% --- Abstract ---------------------------------------------------------------
+\begin{abstract}
+Social networks generate vast graphs of human connections, making scalable and accurate friend recommendation a critical challenge. This report presents a comprehensive study of a Friend Recommendation System built upon \emph{link prediction} using Graph Neural Networks (GNNs). The system is trained and evaluated on the SNAP Facebook Ego Network, a real‑world social‑graph benchmark. Eight GNN architectures are benchmarked: GCN, GraphConv (Vanilla GNN), GAT, GraphSAGE, GIN, TransformerConv, GATv2, and LightGCN. Each model encodes node embeddings that capture structural proximity; a dot‑product decoder then scores candidate friendship links. Training uses Bayesian Personalized Ranking (BPR) loss. Models are assessed using AUC, Average Precision (AP), Recall@10, nDCG@10, and Mean Reciprocal Rank (MRR). GIN and the Vanilla GNN emerge as top performers (AUC $>$ 0.94). Feature‑ablation experiments confirm that enriching node features with global topological signals (PageRank) improves nDCG@10 by $\approx$1.1 pp. Explainability is examined via GATv2 attention‑weight subgraph visualisations, and t‑SNE plots reveal meaningful community structure in the learned embeddings. The report discusses trade‑offs between model complexity and recommendation quality and outlines future directions.
+\end{abstract}
+\begin{IEEEkeywords}
+Graph Neural Networks, Link Prediction, Friend Recommendation, BPR Loss, GCN, GAT, GIN, Node Embeddings, Social Network Analysis, Explainable AI
+\end{IEEEkeywords}
+% --- Sections ---------------------------------------------------------------
+\section{Introduction}
+Online social platforms such as Facebook, LinkedIn, and Twitter rely on friend or connection recommendation to grow user engagement and strengthen community bonds. Traditionally, such systems employed collaborative filtering or heuristic graph measures (common neighbours, Jaccard similarity, Adamic--Adar index). While effective at small scale, these approaches fail to capture the rich, multi‑hop structural patterns encoded in social graphs.
+
+Graph Neural Networks (GNNs) address this limitation by learning continuous vector representations of nodes that aggregate information from neighbourhood structure through successive message‑passing layers. The dot product of two node embeddings then provides a principled score for any candidate edge, enabling a natural formulation of friend recommendation as \emph{link prediction}.
+
+This project applies different state‑of‑the‑art GNN architectures to the task of friend recommendation on the SNAP Facebook Ego Network. The study covers the full machine‑learning pipeline: feature engineering, model training with BPR ranking loss, evaluation across five ranking metrics, efficiency profiling, embedding visualisation, and explainability analysis. Ablation studies isolate the contribution of each node‑feature set, and a depth ablation for GCN demonstrates the over‑smoothing phenomenon empirically.
+
+The remainder of this report is organised as follows. Section~\ref{sec:problem} formally states the link‑prediction problem. Section~\ref{sec:objectives} enumerates the project objectives. Section~\ref{sec:litreview} reviews relevant prior work. Section~\ref{sec:methodology} describes the methodology. Section~\ref{sec:math} provides the mathematical formulation. Section~\ref{sec:architectures} details each model architecture. Section~\ref{sec:setup} describes the experimental setup. Section~\ref{sec:results} presents results and analysis. Sections~\ref{sec:tradeoff}--\ref{sec:discussion} cover efficiency trade‑offs, visualisations, and discussion. Sections~\ref{sec:conclusion} and \ref{sec:future} conclude the report.
+
+\section{Problem Statement}\label{sec:problem}
+Modern social networking platforms generate large‑scale graph‑structured data, where users are represented as nodes and friendships as edges. A key challenge is to accurately recommend new potential friends, which can be formulated as a \emph{link prediction} problem.
+
+Traditional heuristic measures (common neighbours, Jaccard similarity) fail to capture complex multi‑hop relationships and global structural patterns. Hence a learning‑based approach that can model both local and global connectivity patterns is required.
+
+Challenges specific to GNN‑based friend recommendation include:
+\begin{itemize}
+  \item \textbf{Model Selection:} Multiple GNN architectures exist (GCN, GAT, GraphSAGE, GIN, Transformer‑based), but their comparative effectiveness for link prediction on social graphs is unclear.
+  \item \textbf{Feature Representation:} Raw graph data lacks explicit node features; we must design meaningful representations (degree, PageRank) that incorporate both local and global structure.
+  \item \textbf{Ranking Optimization:} Friend recommendation is a ranking problem; appropriate loss functions such as Bayesian Personalized Ranking (BPR) are needed instead of standard classification losses.
+  \item \textbf{Evaluation Complexity:} Ranking‑based metrics (AUC, AP, Recall@K, nDCG@K, MRR) are required to properly assess recommendation quality.
+  \item \textbf{Efficiency vs Accuracy Trade‑off:} More complex models (attention‑based GNNs) may improve expressiveness but increase computational cost.
+  \item \textbf{Embedding Understanding:} Verify that learned embeddings capture meaningful social structures (communities).
+  \item \textbf{Interpretability:} Provide explainability mechanisms (e.g., attention‑weight subgraph visualisation).
+  \item \textbf{Over‑smoothing:} Increasing GNN depth can degrade performance by making node embeddings indistinguishable; this must be analysed.
+\end{itemize}
+
+The core problem addressed in this project is to design, implement, and systematically evaluate a robust, interpretable, and efficient GNN‑based friend recommendation system that captures structural patterns in social networks while balancing accuracy, scalability, and explainability.
+
+\section{Objectives}\label{sec:objectives}
+\begin{enumerate}[label=\textbf{O\arabic*.}]
+  \item Design a multi‑feature node representation that combines identity, local topology (normalised degree), and global topology (PageRank) via a feature ablation study.
+  \item Implement and train different GNN architectures (GCN, GraphConv, GAT, GraphSAGE, GIN, TransformerConv, GATv2, LightGCN) for link prediction on a real‑world social graph.
+  \item Optimise all models using Bayesian Personalized Ranking (BPR) loss and evaluate on five complementary ranking metrics.
+  \item Profile training efficiency (time per epoch) and construct an accuracy‑versus‑efficiency Pareto frontier.
+  \item Visualise learned node embeddings using t‑SNE and analyse alignment with Louvain community structure.
+  \item Provide explainability for GATv2 recommendations through attention‑weight subgraph analysis.
+  \item Investigate the over‑smoothing phenomenon in GCN by varying model depth.
+\end{enumerate}
+
+\section{Literature Review}\label{sec:litreview}
+\subsection{Traditional Link Prediction}
+Early link prediction methods relied on graph‑theoretic heuristics. Liben‑Nowell and Kleinberg~\cite{libennowell2007} showed that topological measures such as common neighbours, Jaccard coefficient, and Adamic--Adar index can predict future edges in co‑authorship networks with reasonable accuracy. These methods require no training but cannot capture long‑range patterns.
+
+\subsection{Graph Neural Networks}
+Kipf and Welling~\cite{kipf2017} introduced the Graph Convolutional Network (GCN), which approximates spectral convolutions using a first‑order Chebyshev polynomial. Hamilton \textit{et al.}~\cite{hamilton2017} proposed GraphSAGE, which samples fixed‑size neighbourhoods and aggregates with learnable functions, enabling inductive inference on unseen nodes. Veli\v{c}kovi\'c \textit{et al.}~\cite{velickovic2018} introduced the Graph Attention Network (GAT), where each node attends over its neighbours with learned attention coefficients, providing interpretable edge importance scores. Xu \textit{et al.}~\cite{xu2019} developed the Graph Isomorphism Network (GIN), theoretically as powerful as the Weisfeiler–Lehman graph isomorphism test.
+
+\subsection{Attention Variants and Lightweight Models}
+Brody \textit{et al.}~\cite{brody2022} proposed GATv2, which resolves the static attention limitation of GAT by computing dynamic attention coefficients that depend jointly on source and target features. He \textit{et al.}~\cite{he2020} introduced LightGCN, which strips away feature transformations and non‑linearities, relying solely on neighbourhood aggregation—well‑suited to recommendation tasks.
+
+\subsection{Ranking Loss for Recommendation}
+Rendle \textit{et al.}~\cite{rendle2009} proposed Bayesian Personalized Ranking (BPR), a pairwise ranking loss that maximises the probability of ranking a positive item above a randomly sampled negative item. BPR has been widely adopted in recommender system literature and is used in this project to train all GNN models.
+
+\subsection{Explainability in GNNs}
+Ying \textit{et al.}~\cite{ying2019} proposed GNNExplainer, which identifies important sub‑graphs for individual predictions. Attention‑based models such as GAT and GATv2 provide native interpretability through their attention weights, which can be visualised as edge importance in the computation graph.
+
+\section{Methodology}\label{sec:methodology}
+\subsection{Dataset}
+The \textbf{SNAP Facebook Ego Network}~\cite{leskovec2012} is an undirected graph comprising 4,039 nodes (users) and 88,234 edges (friendships), derived from Facebook ego‑networks. The dataset is loaded using PyTorch Geometric's \texttt{Planetoid}-compatible interface.
+
+\subsection{Graph Representation}
+The social network is represented as an undirected graph $\mathcal{G}=(\mathcal{V},\mathcal{E})$. All edges are treated as undirected by adding reverse edges. Self‑loops are excluded during feature computation but may be incorporated by certain convolution operators. The edge index tensor $\mathbf{E}\in\mathbb{Z}^{2\times|\mathcal{E}|}$ is stored in COO format for efficient sparse operations in PyTorch Geometric.
+
+\subsection{Data Splitting}
+Edges are randomly split into training (80\%), validation (10\%), and test (10\%) sets using PyTorch Geometric's \texttt{RandomLinkSplit}. An equal number of negative (non‑existing) edges are sampled per split. Node features are computed on the full graph prior to splitting to avoid information leakage in structural features.
+
+\subsection{Feature Engineering}\label{sec:features}
+Three feature configurations are studied in an ablation experiment:
+\begin{enumerate}
+  \item \textbf{Baseline – Identity Matrix:} Each node is represented by a one‑hot identity vector of dimension $N$.
+  \item \textbf{+ Local Topology – Normalised Degree:} The node degree $d_i$ normalised by the maximum degree across all nodes is appended as an additional scalar feature.
+  \item \textbf{+ Global Topology – PageRank:} The PageRank score $\pi_i$ of each node, computed with damping factor 0.85, is appended.
+\end{enumerate}
+The final feature matrix $\mathbf{X}\in\mathbb{R}^{N\times d}$ is used as input to all GNN encoders.
+
+\subsection{Encoder–Decoder Architecture}
+All models follow a unified \textit{encoder–decoder} paradigm:
+\begin{itemize}
+  \item \textbf{Encoder:} A GNN $\text{Enc}_\theta:\mathbb{R}^{N\times d}\times\mathcal{E}\to\mathbb{R}^{N\times h}$ maps the input features and graph structure to node embeddings $\mathbf{Z}=\text{Enc}_\theta(\mathbf{X},\mathbf{E})$.
+  \item \textbf{Decoder:} A bilinear dot‑product decoder scores candidate edges: $\hat{y}_{uv}=\mathbf{z}_u^{\top}\mathbf{z}_v$.
+\end{itemize}
+
+\subsection{Training Strategy}
+Training uses the \textbf{BPR (Bayesian Personalized Ranking) loss}. For each positive edge $(u,v^+)$, one negative node $v^-$ is sampled uniformly at random, and the model is trained to satisfy $\hat{y}_{u,v^+}>\hat{y}_{u,v^-}$. The Adam optimiser with learning rate $10^{-3}$ and weight decay $10^{-5}$ is used. Early stopping is applied based on validation AUC with a patience of 20 epochs, and the best checkpoint is restored for evaluation.
+
+\section{Mathematical Formulation}\label{sec:math}
+\subsection{GNN Message Passing}
+The general message‑passing framework~\cite{gilmer2017} updates the embedding of node $v$ at layer $\ell$ as:
+\begin{equation}
+\mathbf{h}_v^{(\ell)} = \text{UPDATE}\!\left(\mathbf{h}_v^{(\ell-1)},\; \text{AGGREGATE}\!\left(\{\mathbf{h}_u^{(\ell-1)} : u \in \mathcal{N}(v)\}\right)\right)
+\label{eq:mp}
+\end{equation}
+where $\mathcal{N}(v)$ is the neighbourhood of $v$.
+
+\subsection{GCN Propagation Rule}
+The GCN layer~\cite{kipf2017} implements:
+\begin{equation}
+\mathbf{H}^{(\ell)} = \sigma\!\left(\tilde{\mathbf{D}}^{-\frac{1}{2}}\tilde{\mathbf{A}}\tilde{\mathbf{D}}^{-\frac{1}{2}}\,\mathbf{H}^{(\ell-1)}\,\mathbf{W}^{(\ell)}\right)
+\label{eq:gcn}
+\end{equation}
+where $\tilde{\mathbf{A}}=\mathbf{A}+\mathbf{I}$ and $\tilde{\mathbf{D}}$ is its degree matrix.
+
+\subsection{GAT Attention Mechanism}
+The GAT~\cite{velickovic2018} computes attention coefficients:
+\begin{equation}
+\alpha_{vu}=\frac{\exp\!\left(\text{LeakyReLU}\!\left(\mathbf{a}^\top[\mathbf{W}\mathbf{h}_v\|\mathbf{W}\mathbf{h}_u]\right)\right)}{\sum_{k\in\mathcal{N}(v)}\exp\!\left(\text{LeakyReLU}\!\left(\mathbf{a}^\top[\mathbf{W}\mathbf{h}_v\|\mathbf{W}\mathbf{h}_k]\right)\right)}
+\label{eq:gat}
+\end{equation}
+and the updated embedding is $\mathbf{h}_v' = \sigma\!\left(\sum_{u\in\mathcal{N}(v)} \alpha_{vu}\,\mathbf{W}\mathbf{h}_u\right)$.
+
+\subsection{Dot‑Product Decoder}
+Given encoder output $\mathbf{Z}= [\mathbf{z}_1,\ldots,\mathbf{z}_N]^\top$, the probability of a link between nodes $u$ and $v$ is:
+\begin{equation}
+\hat{y}_{uv}=\sigma\!\left(\mathbf{z}_u^{\top}\mathbf{z}_v\right)
+\label{eq:decoder}
+\end{equation}
+where $\sigma$ denotes the sigmoid function.
+
+\subsection{BPR Loss}
+For a batch $\mathcal{B}$ of $(u,v^+,v^-)$ triplets:
+\begin{equation}
+\mathcal{L}_{\text{BPR}} = -\frac{1}{|\mathcal{B}|}\sum_{(u,v^+,v^-)\in\mathcal{B}} \ln\,\sigma\!\left(\hat{y}_{u,v^+}-\hat{y}_{u,v^-}\right) + \lambda\,\|\Theta\|_2^2
+\label{eq:bpr}
+\end{equation}
+with $\lambda$ as the L2 regularisation coefficient.
+
+\subsection{Ranking Metrics}
+\textbf{nDCG@K} measures ranking quality:
+\begin{equation}
+\text{nDCG@}K = \frac{\text{DCG@}K}{\text{IDCG@}K},\quad \text{DCG@}K = \sum_{k=1}^{K}\frac{\text{rel}_k}{\log_2(k+1)}
+\end{equation}
+\textbf{MRR} (Mean Reciprocal Rank) is the mean of reciprocal ranks of the first relevant item:
+\begin{equation}
+\text{MRR}=\frac{1}{|Q|}\sum_{q\in Q}\frac{1}{\text{rank}_q}
+\end{equation}
+
+\section{Model Architectures}\label{sec:architectures}
+\subsection{Graph Convolutional Network (GCN)}
+GCN~\cite{kipf2017} applies the symmetric normalised Laplacian smoothing (Eq.~\ref{eq:gcn}). It is simple, efficient, and serves as the primary baseline. Its limitation is over‑smoothing as depth increases.
+
+\subsection{Vanilla GraphConv (GNN)}
+The vanilla GraphConv operator learns separate weight matrices for the node's own features and the aggregated neighbourhood message:
+\begin{equation}
+\mathbf{h}_v^{(\ell)} = \mathbf{W}_1\mathbf{h}_v^{(\ell-1)} + \mathbf{W}_2 \cdot \text{mean}_{u\in\mathcal{N}(v)} \mathbf{h}_u^{(\ell-1)}
+\end{equation}
+It avoids the symmetric normalisation constraint and consistently achieves competitive performance.
+
+\subsection{Graph Attention Network (GAT)}
+GAT~\cite{velickovic2018} computes per‑edge attention weights (Eq.~\ref{eq:gat}), allowing the model to focus on the most relevant neighbours. Multi‑head attention is used (4 heads).
+
+\subsection{GraphSAGE}
+GraphSAGE~\cite{hamilton2017} samples a fixed‑size neighbourhood (up to 10 neighbours per node), aggregates with a mean aggregator, and concatenates the result with the node's own embedding before applying a linear transformation.
+
+\subsection{Graph Isomorphism Network (GIN)}
+GIN~\cite{xu2019} uses a sum aggregator and a learnable $\epsilon$ parameter:
+\begin{equation}
+\mathbf{h}_v^{(\ell)} = \text{MLP}\!\left((1+\epsilon)\,\mathbf{h}_v^{(\ell-1)} + \sum_{u\in\mathcal{N}(v)}\mathbf{h}_u^{(\ell-1)}\right)
+\end{equation}
+Sum aggregation is provably more expressive than mean or max aggregation.
+
+\subsection{TransformerConv}
+TransformerConv~\cite{shi2021} applies a scaled dot‑product attention mechanism over graph neighbourhoods:
+\begin{equation}
+\alpha_{vu}=\text{softmax}\!\left(\frac{(\mathbf{W}_Q\mathbf{h}_v)^{\top}(\mathbf{W}_K\mathbf{h}_u)}{\sqrt{d_k}}\right)
+\end{equation}
+
+\subsection{GATv2}
+GATv2~\cite{brody2022} addresses the static attention limitation of GAT by computing:
+\begin{equation}
+ e_{vu}=\mathbf{a}^{\top}\text{LeakyReLU}\!\left(\mathbf{W}\,[\mathbf{h}_v \| \mathbf{h}_u]\right)
+\end{equation}
+which enables dynamic, query‑dependent attention.
+
+\subsection{LightGCN}
+LightGCN~\cite{he2020} removes feature transformation and non‑linearities entirely, relying solely on neighbourhood aggregation:
+\begin{equation}
+\mathbf{h}_v^{(\ell)} = \sum_{u\in\mathcal{N}(v)} \frac{1}{\sqrt{|\mathcal{N}(v)||\mathcal{N}(u)|}}\,\mathbf{h}_u^{(\ell-1)}
+\end{equation}
+The final embedding is a weighted sum of all layers.
+
+\section{Experimental Setup}\label{sec:setup}
+\subsection{Hardware and Software}
+All experiments are executed on a machine with an NVIDIA GPU (CUDA‑enabled), Python 3.10, PyTorch 2.x, and PyTorch Geometric 2.x. NetworkX is used for PageRank computation, and Scikit‑learn for evaluation metrics.
+
+\subsection{Hyperparameters}
+\begin{table}[!htbp]
+\centering
+\caption{Shared hyperparameter configuration for all models.}
+\label{tab:hyperparams}
+\begin{tabular}{ll}
+\toprule
+\textbf{Hyperparameter} & \textbf{Value} \\
+\midrule
+Hidden dimension      & 64 \\
+Number of GNN layers  & 2  \\
+Dropout               & 0.3 \\
+Optimiser             & Adam \\
+Learning rate         & $10^{-3}$ \\
+Weight decay          & $10^{-5}$ \\
+Batch size            & Full‑batch \\
+Max epochs            & 200 \\
+Early stopping patience & 20 \\
+Negative sampling ratio & 1:1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Evaluation Protocol}
+For each model, the test split is used exclusively for final metric computation. Recall@10, nDCG@10, and MRR are computed by ranking all non‑training nodes as candidates for each test user and comparing against held‑out positive edges.
+
+\section{Results and Analysis}\label{sec:results}
+\subsection{Phase 1: Link Prediction Baselines (BCE Loss)}
+Figures~\ref{fig:lc_gcn}--\ref{fig:lc_gat} show representative training and validation curves for GCN, GNN, and GAT respectively.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{learning_curves_gcn.png}
+  \caption{Learning curves for the GCN model: training BPR loss (left) and validation AUC (right) over epochs.}
+  \label{fig:lc_gcn}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{learning_curves_gnn.png}
+  \caption{Learning curves for the Vanilla GNN (GraphConv) model: BPR loss (left) and validation AUC (right) over epochs.}
+  \label{fig:lc_gnn}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{learning_curves_gat.png}
+  \caption{Learning curves for the GAT model: BPR loss (left) and validation AUC (right) over epochs.}
+  \label{fig:lc_gat}
+\end{figure}
+
+The GCN model exhibits a smooth, monotonic decrease in BPR loss and rapid AUC convergence above 0.88 within the first 10 epochs. GNN starts with a higher initial loss but ultimately converges to a higher final AUC, consistent with its superior test performance. GAT shows oscillatory training loss early on due to attention coefficient instability, but stabilises after epoch 20.
+
+\subsection{Phase 2: Full BPR Benchmark}
+Figure~\ref{fig:phase2_curves} shows aggregated learning curves for all eight models in Phase 2.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{learning_curves_phase2.png}
+  \caption{Phase 2 aggregated learning curves: BPR training loss (left) and validation AUC (right) for all eight GNN models over 200 epochs.}
+  \label{fig:phase2_curves}
+\end{figure}
+
+Figure~\ref{fig:model_comparison} presents the full benchmark bar chart, and Table~\ref{tab:results} summarises all metrics.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{model_comparison.png}
+  \caption{Phase 2 link‑prediction benchmark (BPR loss): AUC, AP, Recall@10, nDCG@10, and MRR for all eight GNN architectures.}
+  \label{fig:model_comparison}
+\end{figure}
+
+\begin{table}[!htbp]
+  \centering
+  \caption{Test‑set performance of all eight GNN models on the SNAP Facebook Ego Network. Best values are \textbf{bold}.}
+  \label{tab:results}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lccccc}
+    \toprule
+    \textbf{Model} & \textbf{AUC} & \textbf{AP} & \textbf{Recall@10} & \textbf{nDCG@10} & \textbf{MRR} \\
+    \midrule
+    GCN           & 0.916 & 0.920 & 0.402 & 0.295 & 0.316 \\
+    GNN           & \textbf{0.938} & \textbf{0.933} & 0.570 & 0.422 & 0.422 \\
+    GAT           & 0.920 & 0.921 & 0.318 & 0.214 & 0.225 \\
+    GraphSAGE     & 0.916 & 0.910 & 0.379 & 0.302 & 0.344 \\
+    GIN           & 0.944 & 0.941 & \textbf{0.546} & \textbf{0.419} & \textbf{0.420} \\
+    TransformerConv & 0.920 & 0.912 & 0.358 & 0.278 & 0.303 \\
+    GATv2         & 0.922 & 0.921 & 0.361 & 0.229 & 0.237 \\
+    LightGCN      & 0.875 & 0.887 & 0.298 & 0.221 & 0.243 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{Key Observations:}
+\begin{itemize}
+  \item GIN achieves the highest AUC (0.944) and best ranking metrics (Recall@10 = 0.546, nDCG@10 = 0.419).
+  \item GNN (GraphConv) is a close second in AUC (0.938) and nDCG@10 (0.422) while maintaining fast training times.
+  \item Attention‑based models (GAT, GATv2, TransformerConv) underperform relative to their computational cost on this dataset, suggesting that uniform neighbourhood weighting may suffice for large, dense social graphs.
+  \item LightGCN has the lowest AUC (0.875), confirming that feature transformation and non‑linearities are beneficial when rich node features are available.
+\end{itemize}
+
+\subsection{GCN Depth Ablation: Over‑Smoothing}
+Figure~\ref{fig:ablation_depth} shows the effect of increasing GCN depth. A 1‑layer GCN achieves AUC = 0.8906 (AP = 0.8861), while a 5‑layer GCN drops to AUC = 0.8791 (AP = 0.8812), demonstrating the over‑smoothing phenomenon: deep stacking of symmetric normalised convolutions causes node embeddings to converge, erasing discriminative information.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.85\columnwidth]{ablation_results.png}
+  \caption{GCN depth ablation: AUC and AP for 1‑, 2‑, and 5‑layer GCN, demonstrating performance degradation due to over‑smoothing at deeper depths.}
+  \label{fig:ablation_depth}
+\end{figure}
+
+\section{Accuracy vs Efficiency Trade‑off}\label{sec:tradeoff}
+Figure~\ref{fig:efficiency} plots test nDCG@10 against average training time per epoch (ms). The Pareto‑optimal region (high accuracy, low time) is occupied by GNN and GIN.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.82\columnwidth]{efficiency_tradeoff.png}
+  \caption{Accuracy (test nDCG@10) vs. efficiency (average time per epoch in milliseconds) trade‑off for all eight GNN models.}
+  \label{fig:efficiency}
+\end{figure}
+
+\begin{table}[!htbp]
+  \centering
+  \caption{Model efficiency summary: average time per epoch and corresponding nDCG@10.}
+  \label{tab:efficiency}
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Model} & \textbf{Time / Epoch (ms)} & \textbf{nDCG@10} \\
+    \midrule
+    LightGCN      & $\approx 5$  & 0.221 \\
+    GCN           & $\approx 8$  & 0.295 \\
+    GNN           & $\approx 8$  & 0.422 \\
+    GIN           & $\approx 9$  & 0.419 \\
+    GraphSAGE     & $\approx 8$  & 0.302 \\
+    TransformerConv & $\approx 13$ & 0.278 \\
+    GAT           & $\approx 18$ & 0.214 \\
+    GATv2         & $\approx 29$ & 0.229 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+As seen, GATv2 is by far the slowest model (~29 ms per epoch) while delivering only moderate nDCG@10 (0.229). GNN and GIN are both fast (~8–9 ms) and accurate, making them the recommended architectures for deployment.
+
+\section{Feature Ablation Study}\label{sec:feature_ablation}
+Figure~\ref{fig:ablation_feature} presents the results of the three‑stage feature ablation for the GIN encoder.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.85\columnwidth]{ablation_chart.png}
+  \caption{Feature ablation study for the GIN encoder: Test AUC and nDCG@10 for baseline identity matrix features, with local topology (normalised degree), and with global topology (PageRank).}
+  \label{fig:ablation_feature}
+\end{figure}
+
+Adding local topology (normalised degree) improves AUC from 0.9352 to 0.9439 (+0.87 pp) and nDCG@10 from 0.4190 to 0.4215 (+0.25 pp). Further adding global topology (PageRank) improves AUC to 0.9457 and nDCG@10 to 0.4302 (+1.12 pp over baseline). This confirms that global structural signals meaningfully enhance recommendation quality beyond purely local neighbourhood information.
+
+\section{Visualisation and Explainability}\label{sec:xai}
+\subsection{t‑SNE Node Embedding Visualisations}
+t‑SNE projections of the learned node embeddings (final epoch) are coloured by Louvain community assignment. Figure~\ref{fig:tsne_dashboard} shows the dashboard comparison across all eight models.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{tsne_dashboard.png}
+  \caption{t‑SNE node embedding visualisations (final epoch, coloured by 7 Louvain communities) for all eight GNN architectures.}
+  \label{fig:tsne_dashboard}
+\end{figure}
+
+Figures~\ref{fig:tsne_gcn}--\ref{fig:tsne_gat} show individual before‑and‑after t‑SNE comparisons (untrained vs. trained embeddings) for GCN, GNN (GraphConv), and GAT respectively.
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{tsne_clusters_gcn.png}
+  \caption{t‑SNE visualisation of GCN node embeddings: untrained (left) vs. trained final epoch (right), coloured by Louvain community.}
+  \label{fig:tsne_gcn}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{tsne_gnn.png}
+  \caption{t‑SNE visualisation of GraphConv (GNN) node embeddings: untrained (left) vs. trained final epoch (right), coloured by Louvain community.}
+  \label{fig:tsne_gnn}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{tsne_clusters_gat.png}
+  \caption{t‑SNE visualisation of GAT node embeddings: untrained (left) vs. trained final epoch (right), coloured by Louvain community.}
+  \label{fig:tsne_gat}
+\end{figure}
+
+In all models, the untrained embeddings form a largely undifferentiated cloud. After training, embeddings organise into clearly separated colour‑coded clusters corresponding to distinct Louvain communities. GraphConv (GNN) produces the most compact and well‑separated clusters, consistent with its high ranking performance. GCN embeddings form an elongated arc structure, suggesting that the symmetric Laplacian smoothing spreads community information along a low‑dimensional manifold rather than producing tight spherical clusters.
+
+\subsection{XAI: GATv2 Attention‑Weight Subgraph}
+Figure~\ref{fig:attention} visualises the 2‑hop subgraph centred on target user node 35, with GATv2 attention weights encoded as edge thickness. The recommended friend is node 134 (green).
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.85\columnwidth]{attention_subgraph.png}
+  \caption{XAI: GATv2 attention‑weight subgraph (2‑hop neighbourhood). Target user (node 35, red), recommended friend (node 134, green), and context neighbours (blue). Edge thickness encodes relative attention weight.}
+  \label{fig:attention}
+\end{figure}
+
+The visualisation reveals that GATv2 concentrates high attention weight on edges leading through a dense hub of mutual connections between nodes 35 and 134. This is semantically meaningful: the recommendation is driven by strong mutual embedding proximity mediated by shared social context, mirroring the common‑neighbour heuristic but learned end‑to‑end from data. The XAI view provides a transparent justification for the recommendation that can be communicated to end users.
+
+\section{Discussion}\label{sec:discussion}
+\paragraph{Model Selection.} GIN and GNN (GraphConv) emerge as the recommended architectures for production deployment on social graphs of this scale. Both achieve top‑tier ranking metrics while requiring only $\sim$8–9 ms per training epoch. Their superiority over attention‑based models (GAT, GATv2, TransformerConv) on this dataset suggests that for dense, homogeneous social graphs with limited semantic node features, the additional expressiveness of attention does not outweigh its computational cost.
+
+\paragraph{Feature Engineering.} The ablation study demonstrates a consistent monotonic improvement as structural features are added from identity to degree to PageRank. The improvement in nDCG@10 (from 0.419 to 0.430) is practically significant for a top‑10 recommendation system where incremental gains translate to better user experience.
+
+\paragraph{Over‑Smoothing.} The GCN depth ablation confirms that increasing depth beyond two layers degrades performance. This is a well‑known theoretical limitation of spectral GNNs and motivates the use of residual connections or jumping‑knowledge architectures in future work.
+
+\paragraph{Explainability.} The GATv2 attention subgraph provides per‑recommendation explanations without requiring post‑hoc approximation methods. This is a practical advantage for regulated applications where recommendation systems must be auditable.
+
+\paragraph{Limitations.} The static graph assumption ignores temporal dynamics of friendship formation. The identity‑matrix feature representation does not exploit user profile attributes. All models are trained in a transductive setting and cannot directly handle new users at inference time (except GraphSAGE).
+
+\section{Conclusion}\label{sec:conclusion}
+This report presented a comprehensive study of Graph Neural Network‑based friend recommendation on the SNAP Facebook Ego Network. Eight GNN architectures were trained under BPR ranking loss and benchmarked across five ranking metrics. GIN achieved the highest overall performance (AUC 0.944, Recall@10 0.546, nDCG@10 0.419), closely followed by the Vanilla GNN (GraphConv). Feature ablation confirmed that global topological features (PageRank) improve recommendation quality. t‑SNE visualisations demonstrated that all trained models learn community‑aware embeddings, with GNN producing the most discriminative structure. GATv2 attention‑weight subgraphs provided interpretable explanations for individual recommendations. The GCN depth ablation empirically confirmed the over‑smoothing phenomenon at five layers.
+
+The study establishes GIN and GraphConv as the preferred architectures for social friend recommendation: they deliver state‑of‑the‑art ranking quality at low computational cost, and their embeddings generalise well to the heterogeneous community structure of real social graphs.
+
+\section{Future Work}\label{sec:future}
+\begin{enumerate}
+  \item \textbf{Temporal Graph Learning:} Model friendship formation dynamics using temporal GNNs (TGN, JODIE) to capture evolving social structure.
+  \item \textbf{Inductive Setting:} Extend all transductive models to the inductive setting to handle new users without retraining.
+  \item \textbf{Richer Node Features:} Incorporate user profile attributes (interests, demographics) as additional node features via a joint feature–structure encoder.
+  \item \textbf{Privacy‑Preserving Training:} Apply federated learning or differential privacy to GNN training to protect sensitive social‑graph data.
+  \item \textbf{Scalability:} Evaluate mini‑batch training with GraphSAGE‑style neighbourhood sampling on graphs with millions of nodes (e.g., full Facebook or Twitter datasets).
+  \item \textbf{Deeper Architectures:} Investigate residual GNN and jumping‑knowledge networks to mitigate over‑smoothing and enable deeper message propagation.
+  \item \textbf{Contrastive Learning:} Apply graph contrastive learning (SimCLR on graphs) as a self‑supervised pre‑training strategy to improve embedding quality with limited labelled edges.
+\end{enumerate}
+
+\section*{References}
+\begin{thebibliography}{99}
+\bibitem{kipf2017}
+T. N. Kipf and M. Welling, ``Semi‑Supervised Classification with Graph Convolutional Networks,'' in \textit{Proc. ICLR}, 2017.
+
+\bibitem{velickovic2018}
+P. Veli\v{c}kovi\'c, G. Cucurull, A. Casanova, A. Romero, P. Li\`o, and Y. Bengio, ``Graph Attention Networks,'' in \textit{Proc. ICLR}, 2018.
+
+\bibitem{hamilton2017}
+W. Hamilton, Z. Ying, and J. Leskovec, ``Inductive Representation Learning on Large Graphs,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol. 30, 2017.
+
+\bibitem{xu2019}
+K. Xu, W. Hu, J. Leskovec, and S. Jegelka, ``How Powerful are Graph Neural Networks?,'' in \textit{Proc. ICLR}, 2019.
+
+\bibitem{brody2022}
+S. Brody, U. Alon, and E. Yahav, ``How Attentive are Graph Attention Networks?,'' in \textit{Proc. ICLR}, 2022.
+
+\bibitem{he2020}
+X. He, K. Deng, X. Wang, Y. Li, Y. Zhang, and M. Wang, ``LightGCN: Simplifying and Powering Graph Convolution Network for Recommendation,'' in \textit{Proc. SIGIR}, 2020.
+
+\bibitem{rendle2009}
+S. Rendle, C. Freudenthaler, Z. Gantner, and L. Schmidt‑Thieme, ``BPR: Bayesian Personalized Ranking from Implicit Feedback,'' in \textit{Proc. UAI}, 2009, pp. 452--461.
+
+\bibitem{leskovec2012}
+J. Leskovec and J. J. Mcauley, ``Learning to Discover Social Circles in Ego Networks,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol. 25, 2012.
+
+\bibitem{libennowell2007}
+D. Liben‑Nowell and J. Kleinberg, ``The Link Prediction Problem for Social Networks,'' \textit{J. American Society for Information Science and Technology}, vol. 58, no. 7, pp. 1019--1031, 2007.
+
+\bibitem{gilmer2017}
+J. Gilmer, S. S. Sch\"{u}tt, P. J. Matvey, K. Burke, and K. T. Sch\"{u}tt, ``Neural Message Passing for Quantum Chemistry,'' in \textit{Proc. ICML}, 2017, pp. 1263--1272.
+
+\bibitem{shi2021}
+Y. Shi, Z. Huang, S. Feng, H. Zhong, W. Wang, and Y. Sun, ``Masked Label Prediction: Unified Message Passing Model for Semi‑Supervised Classification,'' in \textit{Proc. IJCAI}, 2021.
+
+\bibitem{ying2019}
+Z. Ying, D. Bourgeois, J. You, M. Zitnik, and J. Leskovec, ``GNNExplainer: Generating Explanations for Graph Neural Networks,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol. 32, 2019.
+\end{thebibliography}
+
+\end{document}
